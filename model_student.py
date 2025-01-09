@@ -83,6 +83,139 @@ def compute_eer(target_scores, nontarget_scores):
     eer = np.mean((frr[min_index], far[min_index]))
     return eer, thresholds[min_index]
 
+class PKTCosSim(nn.Module):
+	'''
+	Learning Deep Representations with Probabilistic Knowledge Transfer
+	http://openaccess.thecvf.com/content_ECCV_2018/papers/Nikolaos_Passalis_Learning_Deep_Representations_ECCV_2018_paper.pdf
+	'''
+	def __init__(self):
+		super(PKTCosSim, self).__init__()
+
+	def forward(self, feat_s, feat_t, eps=1e-6):
+        # Normalize each vector by its norm
+		feat_s_norm = torch.sqrt(torch.sum(feat_s ** 2, dim=1, keepdim=True))
+		feat_s = feat_s / (feat_s_norm + eps)
+		feat_s[feat_s != feat_s] = 0
+
+		feat_t_norm = torch.sqrt(torch.sum(feat_t ** 2, dim=1, keepdim=True))
+		feat_t = feat_t / (feat_t_norm + eps)
+		feat_t[feat_t != feat_t] = 0
+
+		# Calculate the cosine similarity
+		feat_s_cos_sim = torch.mm(feat_s, feat_s.transpose(0, 1))
+		feat_t_cos_sim = torch.mm(feat_t, feat_t.transpose(0, 1))
+
+		# Scale cosine similarity to [0,1]
+		feat_s_cos_sim = (feat_s_cos_sim + 1.0) / 2.0
+		feat_t_cos_sim = (feat_t_cos_sim + 1.0) / 2.0
+
+		# Transform them into probabilities
+		feat_s_cond_prob = feat_s_cos_sim / torch.sum(feat_s_cos_sim, dim=1, keepdim=True)
+		feat_t_cond_prob = feat_t_cos_sim / torch.sum(feat_t_cos_sim, dim=1, keepdim=True)
+
+		# Calculate the KL-divergence
+		loss = torch.mean(feat_t_cond_prob * torch.log((feat_t_cond_prob + eps) / (feat_s_cond_prob + eps)))
+
+		return loss
+    
+class Logits(nn.Module):
+	'''
+	Do Deep Nets Really Need to be Deep?
+	http://papers.nips.cc/paper/5484-do-deep-nets-really-need-to-be-deep.pdf
+	'''
+	def __init__(self):
+		super(Logits, self).__init__()
+
+	def forward(self, out_s, out_t):
+		loss = F.mse_loss(out_s, out_t)
+
+		return loss
+
+class TTM(nn.Module):
+    def __init__(self, l=0.1):
+        super().__init__()
+        self.l = l
+
+    def forward(self, y_s, y_t):
+        p_s = F.log_softmax(y_s, dim=1)
+        p_t = torch.pow(torch.softmax(y_t, dim=1), self.l)
+        norm = torch.sum(p_t, dim=1)
+        p_t = p_t / norm.unsqueeze(1)
+        KL = torch.sum(F.kl_div(p_s, p_t, reduction='none'), dim=1)
+        loss = torch.mean(KL)
+
+        return loss
+    
+class SP(nn.Module):
+	'''
+	Similarity-Preserving Knowledge Distillation
+	https://arxiv.org/pdf/1907.09682.pdf
+	'''
+	def __init__(self):
+		super(SP, self).__init__()
+
+	def forward(self, fm_s, fm_t):
+		fm_s = fm_s.view(fm_s.size(0), -1)
+		G_s  = torch.mm(fm_s, fm_s.t())
+		norm_G_s = F.normalize(G_s, p=2, dim=1)
+
+		fm_t = fm_t.view(fm_t.size(0), -1)
+		G_t  = torch.mm(fm_t, fm_t.t())
+		norm_G_t = F.normalize(G_t, p=2, dim=1)
+
+		loss = F.mse_loss(norm_G_s, norm_G_t)
+
+		return loss
+     
+def lyapunov_kd(ts1, ts2, window_size=10, epsilon=1e-6):
+    """
+    Compute the Lyapunov coefficient to measure similarity between two multivariate time series.
+
+    Parameters:
+    - ts1, ts2: Two multivariate time series (tensors) of shape [batch_size, time_steps, features].
+    - window_size: Length of the local window for Lyapunov computation.
+    - epsilon: Small value to avoid division by zero.
+
+    Returns:
+    - lyapunov_coefficients: Tensor of average Lyapunov coefficients for each batch.
+    """
+    # Ensure the time series have the same shape
+    assert ts1.shape == ts2.shape, "The two time series must have the same shape."
+    batch_size, time_steps, features = ts1.shape
+
+    # Check if the time series is long enough for the given window size
+    if time_steps < window_size:
+        raise ValueError("Time series length must be greater than the window size.")
+
+    # Initialize storage for Lyapunov coefficients
+    lyapunov_values = []
+
+    # Loop over windows
+    for i in range(time_steps - window_size):
+        # Extract local windows for both time series
+        segment_ts1 = ts1[:, i:i + window_size, :]  # Shape: [batch_size, window_size, features]
+        segment_ts2 = ts2[:, i:i + window_size, :]  # Shape: [batch_size, window_size, features]
+
+        # Compute initial and final distances within the window for each feature
+        initial_distances = torch.norm(segment_ts1[:, :-1, :] - segment_ts2[:, :-1, :], dim=1) + epsilon  # Shape: [batch_size, window_size-1]
+        final_distances = torch.norm(segment_ts1[:, 1:, :] - segment_ts2[:, 1:, :], dim=1) + epsilon       # Shape: [batch_size, window_size-1]
+        #print(initial_distances.shape)
+        # Compute log growth rates
+        log_growth_rates = torch.log(final_distances / initial_distances)  # Shape: [batch_size, window_size-1]
+        #print(log_growth_rates.shape)
+        # Average log growth rates over the window
+        avg_log_growth = torch.mean(log_growth_rates, dim=1)  # Shape: [batch_size]
+        #print(avg_log_growth.shape)
+        # Store the results
+        lyapunov_values.append(avg_log_growth)
+
+    # Stack results from all windows and compute the final average for each batch
+    lyapunov_values = torch.stack(lyapunov_values, dim=1)  # Shape: [batch_size, num_windows]
+    #print(lyapunov_values.shape)
+    lyapunov_coefficients = torch.sum(torch.abs(lyapunov_values), dim=1)  # Shape: [batch_size]
+
+    return lyapunov_coefficients
+
 class SSLClassifier(pl.LightningModule):
     def __init__(self, config, *args, **kwargs):
         super().__init__()
