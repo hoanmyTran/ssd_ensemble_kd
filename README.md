@@ -11,7 +11,7 @@ pip install pytorch-lightning
 ```
 ## Training
 
-For teacher, change the import file in **main.py**
+For training the **teacher** or **student**, change the import file in **main.py**
 
 To launch the training, modify the **config.yaml** file:
 - Change *protocol_path* for both *train* and *val* in dataset
