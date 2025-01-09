@@ -16,12 +16,12 @@ evaluation:
   task: "asvspoof"
 
 training:
-  batch_size: 5
-  learning_rate: 0.000003
+  batch_size: 32
+  learning_rate: 0.0001
   weight_decay: 0.0001
   optimizer_gamma: 0.9
   seed: 1234
-  num_epochs: 10
+  num_epochs: 50
   early_stopping:
     es_monitor: "val_loss"
     es_mode: "min"
@@ -29,7 +29,7 @@ training:
   model_checkpoint:
     ckpt_monitor: "val_loss"
     ckpt_mode: "min"
-    ckpt_save_top: 10
+    ckpt_save_top: 3
 
 dataset:
   train:
@@ -42,4 +42,4 @@ dataset:
 
 # https://github.com/TakHemlata/RawBoost-antispoofing
 rawboost:
-  algo: 4
+  algo: 0
