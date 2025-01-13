@@ -113,7 +113,8 @@ class SSLClassifier(pl.LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            x = self.feature_extractor(x, output_hidden_states=True)
+            x = self.ssl_encoder(x, output_hidden_states=True)
+        x = torch.stack(x.hidden_states[:13], dim=1)
         x = x.permute(1, 0, 2, -1)
         x = self.HConv_Interface(x)
         x = self.asp(x.permute(0, 2, 1))
