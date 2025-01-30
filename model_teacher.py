@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 import torchmetrics
-from transformers import Wav2Vec2Model, UniSpeechSatModel, WavLMModel
+from transformers import Wav2Vec2Model, UniSpeechSatModel, WavLMModel, HubertModel
 import pandas as pd
 import numpy as np
 import csv
@@ -86,7 +86,7 @@ def compute_eer(target_scores, nontarget_scores):
 class SSLClassifier(pl.LightningModule):
     def __init__(self, config, *args, **kwargs):
         super().__init__()
-        self.ssl_encoder = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-xls-r-300m")
+        self.ssl_encoder = WavLMModel.from_pretrained("microsoft/wavlm-large")
         self.ssl_encoder.requires_grad_(False)
         self.ssl_encoder.eval()
         self.HConv_Interface = SSL_Interface.interfaces.HierarchicalConvInterface(
